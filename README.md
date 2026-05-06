@@ -53,3 +53,50 @@ To stabilize training in this highly dynamic environment, the following techniqu
 - **Gradient Clipping**: `clip_grad_norm_` (max_norm=1.0) prevents exploding gradients during sudden large Q-value updates.
 - **Learning Rate Scheduling**: `CosineAnnealingLR` gradually reduces the learning rate to ensure fine-tuning near convergence.
 - **Soft Target Updates**: The target network is updated continuously using Polyak averaging ($\tau = 0.005$) instead of hard-copying every $N$ steps, smoothing the learning trajectory.
+
+---
+
+## HW3-4 (Bonus): Rainbow DQN — Random Mode GridWorld
+
+**Implementation (`hw3_4_rainbow.py`)**
+
+### Why Rainbow for Random Mode?
+
+The `random` mode places **all four objects** (Player, Goal, Pit, Wall) at completely random positions every episode.
+This means the agent can never memorize a fixed path — it must learn **abstract spatial relationships** (e.g., "move towards the `+`, away from the `-`") from pure pixels.
+Standard DQN and even Double/Dueling variants struggle to converge reliably in this setting.
+Rainbow DQN combines multiple orthogonal improvements to address each failure mode.
+
+### The 5 Integrated Components
+
+| # | Component | Problem Solved | Key Idea |
+|---|---|---|---|
+| 1 | **Double DQN** | Overestimation bias | Online net selects action; target net evaluates it |
+| 2 | **Dueling Network** | Slow value learning | Separate $V(s)$ and $A(s,a)$ streams; $Q = V + (A - \bar{A})$ |
+| 3 | **Prioritized Replay (PER)** | Wasted sample efficiency | Sample transitions with higher TD-error more often; correct bias with IS weights |
+| 4 | **Multi-step Returns (n=3)** | Slow credit assignment | Bootstrap from $R_t^{(n)} = r_t + \gamma r_{t+1} + \gamma^2 r_{t+2}$; richer gradient signal |
+| 5 | **Noisy Nets** | ε-greedy explores uniformly | Learnable noise $\sigma$ per weight; network decides **when** to explore |
+
+> **Note on Distributional RL (C51):** Omitted intentionally. C51 requires predicting a full return distribution over a discrete support, adding categorical cross-entropy loss and a projection step. On a 4×4 GridWorld with only 3 distinct reward values (−10, −1, +10) the distributional benefit is minimal, while code complexity increases significantly.
+
+### Architecture
+
+```
+Input (64-dim) → Linear(128) → ReLU
+                                    ├─ NoisyLinear(128) → ReLU → NoisyLinear(1)   = V(s)
+                                    └─ NoisyLinear(128) → ReLU → NoisyLinear(4)   = A(s,a)
+                             Q(s,a) = V(s) + A(s,a) − mean_a'[A(s,a')]
+```
+
+### Training Hyperparameters
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| Episodes | 3000 | Longer needed for fully random env |
+| γ (discount) | 0.99 | Encourage long-horizon planning |
+| n-step | 3 | Balance bias vs. variance |
+| PER α | 0.6 | Partial prioritization |
+| PER β annealing | 0.4 → 1.0 | Correct IS bias progressively |
+| Target update | every 200 steps | Hard copy for stability |
+| σ_init (NoisyNet) | 0.5 | Initial exploration level |
+| Grad clip | 10.0 | Prevent exploding gradients |
